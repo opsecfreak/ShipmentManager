@@ -34,7 +34,7 @@ export function updateCSV<T extends { id: string }>(filePath: string, id: string
   const index = records.findIndex(record => record.id === id);
   if (index === -1) return false;
   
-  records[index] = { ...records[index], ...updates };
+  records[index] = { ...records[index], ...updates } as T;
   writeCSV(filePath, records);
   return true;
 }
