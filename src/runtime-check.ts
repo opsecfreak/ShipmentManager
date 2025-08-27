@@ -69,18 +69,20 @@ async function checkRuntime() {
   } catch (error) {
     console.error("❌ Runtime check failed:", error);
     
-    if (error.code === 'ERR_MODULE_NOT_FOUND') {
-      console.error("\n🔧 Module not found. Possible solutions:");
-      console.error("   1. Run 'npm install' to install dependencies");
-      console.error("   2. Check that all files exist in src/ directory");
-      console.error("   3. Verify TypeScript configuration");
-    }
-    
-    if (error.name === 'SyntaxError') {
-      console.error("\n🔧 Syntax error detected. Check for:");
-      console.error("   1. Missing imports or exports");
-      console.error("   2. Incorrect TypeScript syntax");
-      console.error("   3. Module resolution issues");
+    if (error instanceof Error) {
+      if (error.message.includes('Cannot resolve module')) {
+        console.error("\n🔧 Module not found. Possible solutions:");
+        console.error("   1. Run 'npm install' to install dependencies");
+        console.error("   2. Check that all files exist in src/ directory");
+        console.error("   3. Verify TypeScript configuration");
+      }
+      
+      if (error.name === 'SyntaxError') {
+        console.error("\n🔧 Syntax error detected. Check for:");
+        console.error("   1. Missing imports or exports");
+        console.error("   2. Incorrect TypeScript syntax");
+        console.error("   3. Module resolution issues");
+      }
     }
     
     process.exit(1);
