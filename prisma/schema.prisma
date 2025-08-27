@@ -1,0 +1,178 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Customer {
+  id          String   @id @default(uuid())
+  name        String
+  email       String   @unique
+  phone       String?
+  company     String?
+  address     String?
+  city        String?
+  state       String?
+  zipCode     String?
+  country     String   @default("US")
+  website     String?
+  vatNumber   String?
+  industry    String?
+  tags        String[] // SQLite doesn't support arrays, so we'll use JSON
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  tasks       Task[]
+  shipments   Shipment[]
+  orders      Order[]
+  contacts    Contact[]
+
+  @@map("customers")
+}
+
+model Contact {
+  id         String  @id @default(uuid())
+  customerId String
+  name       String
+  email      String?
+  phone      String?
+  role       String?
+  isPrimary  Boolean @default(false)
+
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@map("contacts")
+}
+
+model Task {
+  id          String      @id @default(uuid())
+  title       String
+  description String?
+  priority    Priority    @default(MEDIUM)
+  status      TaskStatus  @default(PENDING)
+  dueDate     DateTime?
+  assignedTo  String?
+  customerId  String?
+  shipmentId  String?
+  orderId     String?
+  tags        String[]    // JSON array
+  estimatedHours Float?
+  actualHours    Float?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  completedAt DateTime?
+
+  // Relations
+  customer  Customer? @relation(fields: [customerId], references: [id])
+  shipment  Shipment? @relation(fields: [shipmentId], references: [id])
+  order     Order?    @relation(fields: [orderId], references: [id])
+
+  @@map("tasks")
+}
+
+model Shipment {
+  id             String         @id @default(uuid())
+  trackingNumber String         @unique
+  customerId     String
+  origin         String
+  destination    String
+  carrier        String
+  status         ShipmentStatus @default(PENDING)
+  estimatedDelivery DateTime?
+  actualDelivery    DateTime?
+  weight         Float?
+  dimensions     String?        // JSON string for dimensions
+  value          Float?
+  insurance      Float?
+  notes          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  // Relations
+  customer Customer @relation(fields: [customerId], references: [id])
+  tasks    Task[]
+  orders   Order[]
+
+  @@map("shipments")
+}
+
+model Order {
+  id          String      @id @default(uuid())
+  orderNumber String      @unique
+  customerId  String
+  status      OrderStatus @default(PENDING)
+  orderDate   DateTime    @default(now())
+  dueDate     DateTime?
+  totalAmount Float       @default(0)
+  notes       String?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  customer    Customer    @relation(fields: [customerId], references: [id])
+  items       OrderItem[]
+  tasks       Task[]
+  shipments   Shipment[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String  @id @default(uuid())
+  orderId     String
+  productName String
+  description String?
+  quantity    Int     @default(1)
+  unitPrice   Float   @default(0)
+  totalPrice  Float   @default(0)
+
+  // Relations
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_items")
+}
+
+// Enums
+enum Priority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum TaskStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  ON_HOLD
+}
+
+enum ShipmentStatus {
+  PENDING
+  PICKED_UP
+  IN_TRANSIT
+  OUT_FOR_DELIVERY
+  DELIVERED
+  EXCEPTION
+  RETURNED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+}
