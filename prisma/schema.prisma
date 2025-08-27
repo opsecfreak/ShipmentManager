@@ -24,7 +24,7 @@ model Customer {
   website     String?
   vatNumber   String?
   industry    String?
-  tags        String[] // SQLite doesn't support arrays, so we'll use JSON
+  tags        String?  // Stored as JSON string
   notes       String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -57,14 +57,14 @@ model Task {
   id          String      @id @default(uuid())
   title       String
   description String?
-  priority    Priority    @default(MEDIUM)
-  status      TaskStatus  @default(PENDING)
+  priority    String      @default("MEDIUM") // Values: LOW, MEDIUM, HIGH, URGENT
+  status      String      @default("PENDING") // Values: PENDING, IN_PROGRESS, COMPLETED, CANCELLED, ON_HOLD
   dueDate     DateTime?
   assignedTo  String?
   customerId  String?
   shipmentId  String?
   orderId     String?
-  tags        String[]    // JSON array
+  tags        String?     // Stored as JSON string
   estimatedHours Float?
   actualHours    Float?
   createdAt   DateTime    @default(now())
@@ -86,7 +86,7 @@ model Shipment {
   origin         String
   destination    String
   carrier        String
-  status         ShipmentStatus @default(PENDING)
+  status         String         @default("PENDING") // Values: PENDING, PICKED_UP, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, EXCEPTION, RETURNED
   estimatedDelivery DateTime?
   actualDelivery    DateTime?
   weight         Float?
@@ -109,7 +109,7 @@ model Order {
   id          String      @id @default(uuid())
   orderNumber String      @unique
   customerId  String
-  status      OrderStatus @default(PENDING)
+  status      String      @default("PENDING") // Values: PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED
   orderDate   DateTime    @default(now())
   dueDate     DateTime?
   totalAmount Float       @default(0)
@@ -141,38 +141,8 @@ model OrderItem {
   @@map("order_items")
 }
 
-// Enums
-enum Priority {
-  LOW
-  MEDIUM
-  HIGH
-  URGENT
-}
-
-enum TaskStatus {
-  PENDING
-  IN_PROGRESS
-  COMPLETED
-  CANCELLED
-  ON_HOLD
-}
-
-enum ShipmentStatus {
-  PENDING
-  PICKED_UP
-  IN_TRANSIT
-  OUT_FOR_DELIVERY
-  DELIVERED
-  EXCEPTION
-  RETURNED
-}
-
-enum OrderStatus {
-  PENDING
-  CONFIRMED
-  PROCESSING
-  SHIPPED
-  DELIVERED
-  CANCELLED
-  REFUNDED
-}
+// Enums represented as strings for SQLite compatibility
+// Priority values: LOW, MEDIUM, HIGH, URGENT
+// TaskStatus values: PENDING, IN_PROGRESS, COMPLETED, CANCELLED, ON_HOLD
+// ShipmentStatus values: PENDING, PICKED_UP, IN_TRANSIT, OUT_FOR_DELIVERY, DELIVERED, EXCEPTION, RETURNED
+// OrderStatus values: PENDING, CONFIRMED, PROCESSING, SHIPPED, DELIVERED, CANCELLED, REFUNDED

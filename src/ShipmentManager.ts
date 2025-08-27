@@ -1,103 +1,191 @@
-import { readCSV, writeCSV, updateCSV, deleteFromCSV } from "./db.js";
-import { Shipment } from "./models.js";
+import prisma from "./db.js";
+import { 
+  type Shipment, 
+  type CreateShipment, 
+  type ShipmentStatus, 
+  parseDimensionsFromJSON, 
+  stringifyDimensionsToJSON
+} from "./models.js";
 import { v4 as uuidv4 } from "uuid";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const SHIPMENTS_FILE = path.join(__dirname, "data", "shipments.csv");
-
-export function getShipments(): Shipment[] {
-  return readCSV<Shipment>(SHIPMENTS_FILE);
+export async function getShipments(): Promise<Shipment[]> {
+  const shipments = await prisma.shipment.findMany();
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }
 
-export function getShipmentById(id: string): Shipment | undefined {
-  return getShipments().find(shipment => shipment.id === id);
+export async function getShipmentById(id: string): Promise<Shipment | null> {
+  const shipment = await prisma.shipment.findUnique({
+    where: { id }
+  });
+  
+  if (!shipment) return null;
+  
+  return {
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  };
 }
 
-export function getShipmentsByCustomer(customerId: string): Shipment[] {
-  return getShipments().filter(shipment => shipment.customerId === customerId);
+export async function getShipmentsByCustomer(customerId: string): Promise<Shipment[]> {
+  const shipments = await prisma.shipment.findMany({
+    where: { customerId }
+  });
+  
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }
 
-export function getShipmentsByStatus(status: Shipment["status"]): Shipment[] {
-  return getShipments().filter(shipment => shipment.status === status);
+export async function getShipmentsByStatus(status: ShipmentStatus): Promise<Shipment[]> {
+  const shipments = await prisma.shipment.findMany({
+    where: { status: status as string }
+  });
+  
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }
 
-export function getPendingShipments(): Shipment[] {
-  return getShipmentsByStatus("pending");
+export async function getPendingShipments(): Promise<Shipment[]> {
+  return await getShipmentsByStatus("PENDING");
 }
 
-export function getActiveShipments(): Shipment[] {
-  return getShipments().filter(shipment => 
-    ["pending", "processing", "shipped", "in-transit"].includes(shipment.status)
-  );
+export async function getActiveShipments(): Promise<Shipment[]> {
+  const shipments = await prisma.shipment.findMany({
+    where: {
+      status: {
+        in: ["PENDING", "PICKED_UP", "IN_TRANSIT"]
+      }
+    }
+  });
+  
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }
 
-export function addShipment(shipmentData: Omit<Shipment, "id" | "createdAt" | "updatedAt">): Shipment {
-  const shipment: Shipment = {
+export async function addShipment(shipmentData: CreateShipment): Promise<Shipment> {
+  // Format dimensions as JSON string if they exist
+  const formattedData = {
     ...shipmentData,
-    id: uuidv4(),
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
+    dimensions: shipmentData.dimensions 
+      ? stringifyDimensionsToJSON(shipmentData.dimensions) 
+      : null,
+    id: uuidv4()
   };
   
-  const shipments = getShipments();
-  shipments.push(shipment);
-  writeCSV(SHIPMENTS_FILE, shipments);
-  return shipment;
-}
-
-export function updateShipment(id: string, updates: Partial<Shipment>): boolean {
-  const updatesWithTimestamp = {
-    ...updates,
-    updatedAt: new Date().toISOString()
+  const shipment = await prisma.shipment.create({
+    data: formattedData
+  });
+  
+  return {
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
   };
-  return updateCSV(SHIPMENTS_FILE, id, updatesWithTimestamp);
 }
 
-export function updateShipmentStatus(id: string, status: Shipment["status"], notes?: string): boolean {
+export async function updateShipment(id: string, updates: Partial<Shipment>): Promise<Shipment> {
+  // Handle dimensions if they exist
+  const formattedUpdates = {
+    ...updates,
+    dimensions: updates.dimensions 
+      ? stringifyDimensionsToJSON(updates.dimensions) 
+      : undefined,
+    updatedAt: new Date()
+  };
+  
+  const shipment = await prisma.shipment.update({
+    where: { id },
+    data: formattedUpdates
+  });
+  
+  return {
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  };
+}
+
+export async function updateShipmentStatus(
+  id: string, 
+  status: ShipmentStatus, 
+  notes?: string
+): Promise<Shipment> {
   const updates: Partial<Shipment> = { status };
   
-  if (status === "shipped" && !getShipmentById(id)?.shipDate) {
-    updates.shipDate = new Date().toISOString();
-  }
-  
-  if (status === "delivered") {
-    updates.actualDelivery = new Date().toISOString();
+  if (status === "DELIVERED") {
+    updates.actualDelivery = new Date();
   }
   
   if (notes) {
     updates.notes = notes;
   }
   
-  return updateShipment(id, updates);
+  return await updateShipment(id, updates);
 }
 
-export function deleteShipment(id: string): boolean {
-  return deleteFromCSV(SHIPMENTS_FILE, id);
+export async function deleteShipment(id: string): Promise<Shipment> {
+  const shipment = await prisma.shipment.delete({
+    where: { id }
+  });
+  
+  return {
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  };
 }
 
-export function getShipmentsByTrackingNumber(trackingNumber: string): Shipment | undefined {
-  return getShipments().find(shipment => shipment.trackingNumber === trackingNumber);
+export async function getShipmentByTrackingNumber(trackingNumber: string): Promise<Shipment | null> {
+  const shipment = await prisma.shipment.findUnique({
+    where: { trackingNumber }
+  });
+  
+  if (!shipment) return null;
+  
+  return {
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  };
 }
 
-export function searchShipments(query: string): Shipment[] {
-  const shipments = getShipments();
+export async function searchShipments(query: string): Promise<Shipment[]> {
   const lowerQuery = query.toLowerCase();
   
-  return shipments.filter(shipment => 
-    shipment.trackingNumber.toLowerCase().includes(lowerQuery) ||
-    shipment.orderNumber.toLowerCase().includes(lowerQuery) ||
-    shipment.carrier.toLowerCase().includes(lowerQuery) ||
-    shipment.items.toLowerCase().includes(lowerQuery)
-  );
+  const shipments = await prisma.shipment.findMany({
+    where: {
+      OR: [
+        { trackingNumber: { contains: lowerQuery, mode: 'insensitive' } },
+        { origin: { contains: lowerQuery, mode: 'insensitive' } },
+        { destination: { contains: lowerQuery, mode: 'insensitive' } },
+        { carrier: { contains: lowerQuery, mode: 'insensitive' } },
+        { notes: { contains: lowerQuery, mode: 'insensitive' } }
+      ]
+    }
+  });
+  
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }
 
-export function getOverdueShipments(): Shipment[] {
+export async function getOverdueShipments(): Promise<Shipment[]> {
   const now = new Date();
-  return getShipments().filter(shipment => {
-    if (!shipment.estimatedDelivery || shipment.status === "delivered") return false;
-    return new Date(shipment.estimatedDelivery) < now;
+  
+  const shipments = await prisma.shipment.findMany({
+    where: {
+      estimatedDelivery: { lt: now },
+      status: { not: "DELIVERED" }
+    }
   });
+  
+  return shipments.map((shipment: any) => ({
+    ...shipment,
+    dimensions: shipment.dimensions ? parseDimensionsFromJSON(shipment.dimensions) : null
+  }));
 }

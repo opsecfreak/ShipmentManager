@@ -1,122 +1,266 @@
-import { readCSV, writeCSV, updateCSV, deleteFromCSV } from "./db.js";
-import { Customer } from "./models.js";
-import { v4 as uuidv4 } from "uuid";
-import path from "path";
-import { fileURLToPath } from "url";
+import prisma from "./db.js";
+import { 
+  type Customer, 
+  type CustomerWithRelations,
+  type CreateCustomer,
+  type Contact,
+  type CreateContact,
+  parseTagsFromJSON,
+  stringifyTagsToJSON
+} from "./models.js";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const CUSTOMERS_FILE = path.join(__dirname, "data", "customers.csv");
-
-export function getCustomers(): Customer[] {
-  return readCSV<Customer>(CUSTOMERS_FILE);
+export async function getCustomers(): Promise<Customer[]> {
+  const customers = await prisma.customer.findMany();
+  return customers.map((customer: any) => ({
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  }));
 }
 
-export function getCustomerById(id: string): Customer | undefined {
-  return getCustomers().find(customer => customer.id === id);
-}
-
-export function getCustomersNeedingAttention(): Customer[] {
-  return getCustomers().filter(customer => customer.needsAttention);
-}
-
-export function addCustomer(customerData: Omit<Customer, "id" | "createdAt" | "totalOrders" | "totalSpent">): Customer {
-  const customer: Customer = {
-    ...customerData,
-    id: uuidv4(),
-    totalOrders: 0,
-    totalSpent: 0,
-    createdAt: new Date().toISOString(),
-    tags: customerData.tags || [],
-    contacts: customerData.contacts || [],
-  };
-  const customers = getCustomers();
-  customers.push(customer);
-  writeCSV(CUSTOMERS_FILE, customers);
-  return customer;
-}
-
-export function updateCustomer(id: string, updates: Partial<Customer>): boolean {
-  return updateCSV(CUSTOMERS_FILE, id, updates);
-}
-
-export function markCustomerNeedsAttention(id: string, needsAttention: boolean = true): boolean {
-  return updateCustomer(id, { needsAttention, lastContactDate: new Date().toISOString() });
-}
-
-export function updateCustomerStats(customerId: string, orderValue: number): boolean {
-  const customer = getCustomerById(customerId);
-  if (!customer) return false;
-  
-  return updateCustomer(customerId, {
-    totalOrders: customer.totalOrders + 1,
-    totalSpent: customer.totalSpent + orderValue
+export async function getCustomersWithRelations(): Promise<CustomerWithRelations[]> {
+  const customers = await prisma.customer.findMany({
+    include: {
+      contacts: true,
+      tasks: true,
+      shipments: true,
+      orders: {
+        include: {
+          items: true
+        }
+      }
+    }
   });
+  
+  return customers.map((customer: any) => ({
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  }));
 }
 
-export function deleteCustomer(id: string): boolean {
-  return deleteFromCSV(CUSTOMERS_FILE, id);
+export async function getCustomerById(id: string): Promise<Customer | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { id }
+  });
+  
+  if (!customer) return null;
+  
+  return {
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  };
 }
 
-export function searchCustomers(query: string): Customer[] {
-  const customers = getCustomers();
+export async function getCustomerWithRelations(id: string): Promise<CustomerWithRelations | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { id },
+    include: {
+      contacts: true,
+      tasks: true,
+      shipments: true,
+      orders: {
+        include: {
+          items: true
+        }
+      }
+    }
+  });
+  
+  if (!customer) return null;
+  
+  return {
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  };
+}
+
+export async function addCustomer(customerData: CreateCustomer): Promise<Customer> {
+  // Prepare data for Prisma by stringifying the tags array
+  const prismaData = {
+    ...customerData,
+    tags: customerData.tags ? stringifyTagsToJSON(customerData.tags) : null
+  };
+  
+  const customer = await prisma.customer.create({
+    data: prismaData
+  });
+  
+  return {
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  };
+}
+
+export async function updateCustomer(id: string, updates: Partial<Customer>): Promise<Customer | null> {
+  // Ensure the customer exists
+  const existingCustomer = await prisma.customer.findUnique({
+    where: { id }
+  });
+  
+  if (!existingCustomer) return null;
+  
+  // Prepare data for Prisma by stringifying the tags array if present
+  const prismaUpdates: any = {
+    ...updates
+  };
+  
+  if (updates.tags) {
+    prismaUpdates.tags = stringifyTagsToJSON(updates.tags);
+  }
+  
+  // Remove relations from direct updates as they need to be handled separately
+  if ('contacts' in prismaUpdates) delete prismaUpdates.contacts;
+  if ('tasks' in prismaUpdates) delete prismaUpdates.tasks;
+  if ('shipments' in prismaUpdates) delete prismaUpdates.shipments;
+  if ('orders' in prismaUpdates) delete prismaUpdates.orders;
+  
+  const updatedCustomer = await prisma.customer.update({
+    where: { id },
+    data: prismaUpdates
+  });
+  
+  return {
+    ...updatedCustomer,
+    tags: updatedCustomer.tags ? parseTagsFromJSON(updatedCustomer.tags) : []
+  };
+}
+
+export async function deleteCustomer(id: string): Promise<boolean> {
+  try {
+    await prisma.customer.delete({
+      where: { id }
+    });
+    return true;
+  } catch (error) {
+    console.error('Failed to delete customer:', error);
+    return false;
+  }
+}
+
+export async function searchCustomers(query: string): Promise<Customer[]> {
   const lowerQuery = query.toLowerCase();
-  return customers.filter(customer =>
-    customer.name.toLowerCase().includes(lowerQuery) ||
-    customer.email.toLowerCase().includes(lowerQuery) ||
-    customer.company?.toLowerCase().includes(lowerQuery) ||
-    customer.phone?.includes(query) ||
-    customer.country?.toLowerCase().includes(lowerQuery) ||
-    customer.industry?.toLowerCase().includes(lowerQuery) ||
-    (customer.tags && customer.tags.some(tag => tag.toLowerCase().includes(lowerQuery))) ||
-    (customer.contacts && customer.contacts.some(contact =>
-      contact.name.toLowerCase().includes(lowerQuery) ||
-      contact.email?.toLowerCase().includes(lowerQuery) ||
-      contact.phone?.includes(query) ||
-      contact.role?.toLowerCase().includes(lowerQuery)
-    ))
-  );
+  
+  const customers = await prisma.customer.findMany({
+    include: {
+      contacts: true
+    },
+    where: {
+      OR: [
+        { name: { contains: lowerQuery, mode: 'insensitive' } },
+        { email: { contains: lowerQuery, mode: 'insensitive' } },
+        { company: { contains: lowerQuery, mode: 'insensitive' } },
+        { phone: { contains: query } },
+        { country: { contains: lowerQuery, mode: 'insensitive' } },
+        { industry: { contains: lowerQuery, mode: 'insensitive' } },
+        { contacts: { 
+            some: {
+              OR: [
+                { name: { contains: lowerQuery, mode: 'insensitive' } },
+                { email: { contains: lowerQuery, mode: 'insensitive' } },
+                { phone: { contains: query } },
+                { role: { contains: lowerQuery, mode: 'insensitive' } }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  });
+  
+  // Handle tag search and convert tags from JSON
+  return customers
+    .map((customer: any) => ({
+      ...customer,
+      tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+    }))
+    .filter((customer: any) => {
+      // If no tags, skip tag filtering
+      if (!query || !customer.tags || customer.tags.length === 0) {
+        return true;
+      }
+      
+      // Check if any tag contains the query
+      return customer.tags.some((tag: string) => tag.toLowerCase().includes(lowerQuery));
+    });
 }
 
 // Advanced filtering
-export function filterCustomersByTag(tag: string): Customer[] {
-  return getCustomers().filter(c => c.tags && c.tags.includes(tag));
+export async function filterCustomersByTag(tag: string): Promise<Customer[]> {
+  const customers = await getCustomers();
+  return customers.filter(c => 
+    c.tags && c.tags.includes(tag)
+  );
 }
 
-export function filterCustomersByIndustry(industry: string): Customer[] {
-  return getCustomers().filter(c => c.industry === industry);
+export async function filterCustomersByIndustry(industry: string): Promise<Customer[]> {
+  return prisma.customer.findMany({
+    where: { industry }
+  }).then((customers: any) => customers.map((customer: any) => ({
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  })));
 }
 
-export function filterCustomersByCountry(country: string): Customer[] {
-  return getCustomers().filter(c => c.country === country);
+export async function filterCustomersByCountry(country: string): Promise<Customer[]> {
+  return prisma.customer.findMany({
+    where: { country }
+  }).then((customers: any) => customers.map((customer: any) => ({
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  })));
 }
 
-export function addTagToCustomer(id: string, tag: string): boolean {
-  const customer = getCustomerById(id);
-  if (!customer) return false;
+export async function addTagToCustomer(id: string, tag: string): Promise<Customer | null> {
+  const customer = await getCustomerById(id);
+  if (!customer) return null;
+  
   const tags = customer.tags || [];
-  if (!tags.includes(tag)) tags.push(tag);
-  return updateCustomer(id, { tags });
+  if (!tags.includes(tag)) {
+    tags.push(tag);
+    return updateCustomer(id, { tags });
+  }
+  
+  return customer;
 }
 
-export function removeTagFromCustomer(id: string, tag: string): boolean {
-  const customer = getCustomerById(id);
-  if (!customer || !customer.tags) return false;
+export async function removeTagFromCustomer(id: string, tag: string): Promise<Customer | null> {
+  const customer = await getCustomerById(id);
+  if (!customer || !customer.tags) return null;
+  
   const tags = customer.tags.filter(t => t !== tag);
   return updateCustomer(id, { tags });
 }
 
-export function addContactToCustomer(id: string, contact: { name: string; email?: string; phone?: string; role?: string }): boolean {
-  const customer = getCustomerById(id);
-  if (!customer) return false;
-  const contacts = customer.contacts || [];
-  contacts.push(contact);
-  return updateCustomer(id, { contacts });
+export async function addContactToCustomer(
+  customerId: string, 
+  contactData: Omit<CreateContact, 'customerId'>
+): Promise<Contact | null> {
+  try {
+    const contact = await prisma.contact.create({
+      data: {
+        ...contactData,
+        customerId
+      }
+    });
+    
+    return contact;
+  } catch (error) {
+    console.error('Failed to add contact:', error);
+    return null;
+  }
 }
 
-export function removeContactFromCustomer(id: string, contactName: string): boolean {
-  const customer = getCustomerById(id);
-  if (!customer || !customer.contacts) return false;
-  const contacts = customer.contacts.filter(c => c.name !== contactName);
-  return updateCustomer(id, { contacts });
+export async function removeContactFromCustomer(customerId: string, contactId: string): Promise<boolean> {
+  try {
+    await prisma.contact.delete({
+      where: {
+        id: contactId,
+        customerId
+      }
+    });
+    
+    return true;
+  } catch (error) {
+    console.error('Failed to remove contact:', error);
+    return false;
+  }
 }

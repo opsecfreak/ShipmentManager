@@ -1,15 +1,23 @@
-import { getTasks, getUrgentTasks, getOverdueTasks } from "./TaskManager.js";
 import { getShipments, getPendingShipments, getOverdueShipments } from "./ShipmentManager.js";
-import { getCustomers, getCustomersNeedingAttention } from "./CustomerManager.js";
 import { getRecentOrders, getTotalRevenue } from "./OrderManager.js";
-import { DashboardData, Task, Shipment, Customer } from "./models.js";
+import { DashboardData, Task } from "./models.js";
+import prisma from "./db.js";
+import { parseTagsFromJSON } from "./models.js";
 
-export function getDashboardData(): DashboardData {
-  const pendingShipments = getPendingShipments().length;
-  const urgentTasks = getUrgentTasks().length;
-  const customersNeedingAttention = getCustomersNeedingAttention().length;
-  const recentOrders = getRecentOrders(30).length; // Last 30 days
-  const totalRevenue = getTotalRevenue(30); // Last 30 days
+export async function getDashboardData(): Promise<DashboardData> {
+  const [
+    pendingShipments, 
+    urgentTasks, 
+    customersNeedingAttention,
+    recentOrders,
+    totalRevenue
+  ] = await Promise.all([
+    getPendingShipments().then(shipments => shipments.length),
+    prisma.task.count({ where: { priority: "HIGH" } }),
+    prisma.customer.count({ where: { tags: { contains: "needs-attention" } } }),
+    getRecentOrders(30).then(orders => orders.length), // Last 30 days
+    getTotalRevenue(30) // Last 30 days
+  ]);
 
   return {
     pendingShipments,
@@ -20,112 +28,233 @@ export function getDashboardData(): DashboardData {
   };
 }
 
-export function getTodaysTasks(): Task[] {
-  const today = new Date().toISOString().split('T')[0];
-  return getTasks().filter(task => {
-    if (!task.completed && typeof task.dueDate === 'string') {
-      return task.dueDate.slice(0, 10) === today;
+export async function getTodaysTasks(): Promise<Task[]> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+
+  const tasks = await prisma.task.findMany({
+    where: {
+      dueDate: {
+        gte: today,
+        lt: tomorrow
+      },
+      status: { not: "COMPLETED" }
     }
-    return false;
   });
+
+  return tasks;
 }
 
-export function getTasksSummary() {
-  const allTasks = getTasks();
-  const incompleteTasks = allTasks.filter(task => !task.completed);
-  const urgentTasks = getUrgentTasks();
-  const overdueTasks = getOverdueTasks();
-  const todaysTasks = getTodaysTasks();
+export async function getTasksSummary() {
+  const [
+    total,
+    incomplete,
+    urgent,
+    overdue,
+    today
+  ] = await Promise.all([
+    prisma.task.count(),
+    prisma.task.count({ where: { status: { not: "COMPLETED" } } }),
+    prisma.task.count({ where: { priority: "HIGH" } }),
+    prisma.task.count({ 
+      where: { 
+        dueDate: { lt: new Date() }, 
+        status: { not: "COMPLETED" } 
+      } 
+    }),
+    getTodaysTasks().then(tasks => tasks.length)
+  ]);
+  
+  const completed = total - incomplete;
 
   return {
-    total: allTasks.length,
-    incomplete: incompleteTasks.length,
-    urgent: urgentTasks.length,
-    overdue: overdueTasks.length,
-    today: todaysTasks.length,
-    completed: allTasks.length - incompleteTasks.length
+    total,
+    incomplete,
+    urgent,
+    overdue,
+    today,
+    completed
   };
 }
 
-export function getShipmentsSummary() {
-  const allShipments = getShipments();
-  const pendingShipments = getPendingShipments();
-  const overdueShipments = getOverdueShipments();
+export async function getShipmentsSummary() {
+  const [
+    allShipments,
+    pendingCount,
+    overdueCount
+  ] = await Promise.all([
+    getShipments(),
+    prisma.shipment.count({ where: { status: "PENDING" } }),
+    prisma.shipment.count({
+      where: {
+        estimatedDelivery: { lt: new Date() },
+        status: { not: "DELIVERED" }
+      }
+    })
+  ]);
   
-  const statusCounts = allShipments.reduce((acc, shipment) => {
-    acc[shipment.status] = (acc[shipment.status] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
+  // Calculate status counts
+  const statusCounts: Record<string, number> = {};
+  for (const shipment of allShipments) {
+    statusCounts[shipment.status] = (statusCounts[shipment.status] || 0) + 1;
+  }
 
   return {
     total: allShipments.length,
-    pending: pendingShipments.length,
-    overdue: overdueShipments.length,
+    pending: pendingCount,
+    overdue: overdueCount,
     statusCounts
   };
 }
 
-export function getCustomersSummary() {
-  const allCustomers = getCustomers();
-  const needingAttention = getCustomersNeedingAttention();
+export async function getCustomersSummary() {
+  const [
+    customers,
+    customerCount,
+    needingAttentionCount
+  ] = await Promise.all([
+    prisma.customer.findMany(),
+    prisma.customer.count(),
+    prisma.customer.count({ where: { tags: { contains: "needs-attention" } } })
+  ]);
   
+  // Get orders total for revenue calculations
+  const orders = await prisma.order.findMany();
+  const totalRevenue = orders.reduce((sum: number, order: any) => sum + order.totalAmount, 0);
+  const averageOrderValue = orders.length > 0 ? totalRevenue / orders.length : 0;
+  
+  // Extract unique values
+  const industries = Array.from(new Set(customers
+    .map((c: any) => c.industry)
+    .filter(Boolean))) as string[];
+    
+  // Extract tags from all customers
+  const allTags: string[] = [];
+  for (const customer of customers) {
+    if (customer.tags) {
+      const tags = parseTagsFromJSON(customer.tags);
+      allTags.push(...tags);
+    }
+  }
+  const uniqueTags = Array.from(new Set(allTags));
+  
+  const countries = Array.from(new Set(customers
+    .map((c: any) => c.country)
+    .filter(Boolean)));
+
   return {
-    total: allCustomers.length,
-    needingAttention: needingAttention.length,
-    totalSpent: allCustomers.reduce((sum, customer) => sum + customer.totalSpent, 0),
-    averageOrderValue: allCustomers.reduce((sum, customer) => sum + customer.totalSpent, 0) / 
-                      Math.max(allCustomers.reduce((sum, customer) => sum + customer.totalOrders, 0), 1),
-    industries: Array.from(new Set(allCustomers.map(c => c.industry).filter(Boolean))),
-    tags: Array.from(new Set(allCustomers.flatMap(c => c.tags || []))),
-    countries: Array.from(new Set(allCustomers.map(c => c.country).filter(Boolean))),
+    total: customerCount,
+    needingAttention: needingAttentionCount,
+    totalSpent: totalRevenue,
+    averageOrderValue,
+    industries,
+    tags: uniqueTags,
+    countries
   };
 }
 
-export function getPersonalizedDailyTasks(): {
-  urgent: Task[];
-  customerFollowUps: Task[];
-  shipmentTasks: Task[];
-  overdue: Task[];
-  today: Task[];
-} {
-  const urgent = getUrgentTasks();
-  const customerFollowUps = getTasks().filter(task => 
-    task.category === "follow-up" && !task.completed
-  );
-  const shipmentTasks = getTasks().filter(task => 
-    task.category === "shipment" && !task.completed
-  );
-  const overdue = getOverdueTasks();
-  const today = getTodaysTasks();
+export async function getPersonalizedDailyTasks() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  
+  const [
+    urgent,
+    overdue,
+    todayTasks
+  ] = await Promise.all([
+    prisma.task.findMany({ where: { priority: "HIGH" } }),
+    prisma.task.findMany({
+      where: {
+        dueDate: { lt: today },
+        status: { not: "COMPLETED" }
+      }
+    }),
+    prisma.task.findMany({
+      where: {
+        dueDate: {
+          gte: today,
+          lt: tomorrow
+        },
+        status: { not: "COMPLETED" }
+      }
+    })
+  ]);
+  
+  // Get tasks related to customers
+  const customerFollowUps = await prisma.task.findMany({
+    where: {
+      status: { not: "COMPLETED" },
+      customerId: { not: null }
+    },
+    include: { customer: true }
+  });
+  
+  // Get tasks related to shipments
+  const shipmentTasks = await prisma.task.findMany({
+    where: {
+      status: { not: "COMPLETED" },
+      shipmentId: { not: null }
+    },
+    include: { shipment: true }
+  });
 
   return {
     urgent,
     customerFollowUps,
     shipmentTasks,
     overdue,
-    today
+    today: todayTasks
   };
 }
 
-export function getAttentionItems(): {
-  customersNeedingAttention: Customer[];
-  overdueShipments: Shipment[];
-  urgentTasks: Task[];
-  overdueTasks: Task[];
-} {
+export async function getAttentionItems() {
+  const [
+    overdueShipments,
+    urgentTasks,
+    overdueTasks
+  ] = await Promise.all([
+    getOverdueShipments(),
+    prisma.task.findMany({ where: { priority: "HIGH" } }),
+    prisma.task.findMany({ 
+      where: { 
+        dueDate: { lt: new Date() }, 
+        status: { not: "COMPLETED" } 
+      } 
+    })
+  ]);
+  
+  // Get customers needing attention
+  const customersNeedingAttention = await prisma.customer.findMany({
+    where: { tags: { contains: "needs-attention" } }
+  }).then((customers: any[]) => customers.map((customer: any) => ({
+    ...customer,
+    tags: customer.tags ? parseTagsFromJSON(customer.tags) : []
+  })));
+
   return {
-    customersNeedingAttention: getCustomersNeedingAttention(),
-    overdueShipments: getOverdueShipments(),
-    urgentTasks: getUrgentTasks(),
-    overdueTasks: getOverdueTasks()
+    customersNeedingAttention,
+    overdueShipments,
+    urgentTasks,
+    overdueTasks
   };
 }
 
-export function generateDailyReport(): string {
-  const dashboard = getDashboardData();
-  const tasksSummary = getTasksSummary();
-  const shipmentsSummary = getShipmentsSummary();
-  const attentionItems = getAttentionItems();
+export async function generateDailyReport(): Promise<string> {
+  const [
+    dashboard,
+    tasksSummary,
+    shipmentsSummary,
+    attentionItems
+  ] = await Promise.all([
+    getDashboardData(),
+    getTasksSummary(),
+    getShipmentsSummary(),
+    getAttentionItems()
+  ]);
   
   let report = `📊 DAILY BUSINESS REPORT - ${new Date().toLocaleDateString()}\n`;
   report += `${"=".repeat(50)}\n\n`;
@@ -150,15 +279,15 @@ export function generateDailyReport(): string {
   
   if (attentionItems.urgentTasks.length > 0) {
     report += `🔥 URGENT TASKS:\n`;
-    attentionItems.urgentTasks.forEach(task => {
-      report += `  • ${task.description}\n`;
+    attentionItems.urgentTasks.forEach((task: any) => {
+      report += `  • ${task.title}\n`;
     });
     report += `\n`;
   }
   
   if (attentionItems.customersNeedingAttention.length > 0) {
     report += `👥 CUSTOMERS NEEDING ATTENTION:\n`;
-    attentionItems.customersNeedingAttention.forEach(customer => {
+    attentionItems.customersNeedingAttention.forEach((customer: any) => {
       report += `  • ${customer.name} (${customer.email})\n`;
     });
   }

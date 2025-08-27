@@ -1,106 +1,158 @@
-import { readCSV, writeCSV, updateCSV, deleteFromCSV } from "./db.js";
-import { Task } from "./models.js";
+import prisma from "./db.js";
+import { parseTagsFromJSON, stringifyTagsToJSON } from "./models.js";
+import type { CreateTask, Task, Priority, TaskStatus } from "./models.js";
 import { v4 as uuidv4 } from "uuid";
-import path from "path";
-import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const TASKS_FILE = path.join(__dirname, "data", "tasks.csv");
-
-export function getTasks(): Task[] {
-  return readCSV<Task>(TASKS_FILE);
+export async function getTasks(): Promise<Task[]> {
+  const tasks = await prisma.task.findMany();
+  return tasks;
 }
 
-export function getTaskById(id: string): Task | undefined {
-  return getTasks().find(task => task.id === id);
-}
-
-export function getTasksByPriority(priority: Task["priority"]): Task[] {
-  return getTasks().filter(task => task.priority === priority && !task.completed);
-}
-
-export function getTasksByCategory(category: Task["category"]): Task[] {
-  return getTasks().filter(task => task.category === category && !task.completed);
-}
-
-export function getUrgentTasks(): Task[] {
-  return getTasks().filter(task => task.priority === "urgent" && !task.completed);
-}
-
-export function getOverdueTasks(): Task[] {
-  const now = new Date();
-  return getTasks().filter(task => {
-    if (!task.dueDate || task.completed) return false;
-    return new Date(task.dueDate) < now;
+export async function getTaskById(id: string): Promise<Task | null> {
+  return await prisma.task.findUnique({
+    where: { id }
   });
 }
 
-export function getTasksByCustomer(customerId: string): Task[] {
-  return getTasks().filter(task => task.customerId === customerId);
+export async function getTasksByPriority(priority: Priority): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: { 
+      priority: priority as string,
+      status: { not: "COMPLETED" } 
+    }
+  });
 }
 
-export function getTasksByShipment(shipmentId: string): Task[] {
-  return getTasks().filter(task => task.shipmentId === shipmentId);
+export async function getTasksByStatus(status: TaskStatus): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: { status: status as string }
+  });
 }
 
-export function addTask(
-  description: string, 
-  priority: Task["priority"] = "medium",
-  category: Task["category"] = "general",
-  dueDate?: string,
-  customerId?: string,
-  shipmentId?: string
-): Task {
-  const task: Task = {
+export async function getUrgentTasks(): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: {
+      priority: "URGENT",
+      status: { not: "COMPLETED" }
+    }
+  });
+}
+
+export async function getOverdueTasks(): Promise<Task[]> {
+  const now = new Date();
+  return await prisma.task.findMany({
+    where: {
+      dueDate: { lt: now },
+      status: { not: "COMPLETED" }
+    }
+  });
+}
+
+export async function getTasksByCustomer(customerId: string): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: { customerId }
+  });
+}
+
+export async function getTasksByShipment(shipmentId: string): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: { shipmentId }
+  });
+}
+
+export async function getTasksByOrder(orderId: string): Promise<Task[]> {
+  return await prisma.task.findMany({
+    where: { orderId }
+  });
+}
+
+export async function addTask(
+  taskData: CreateTask
+): Promise<Task> {
+  // Handle tags if they exist
+  const formattedTask = {
+    ...taskData,
+    tags: taskData.tags ? stringifyTagsToJSON(taskData.tags) : null,
     id: uuidv4(),
-    description,
-    completed: false,
-    priority,
-    category,
-    createdAt: new Date().toISOString(),
-    ...(dueDate && { dueDate }),
-    ...(customerId && { customerId }),
-    ...(shipmentId && { shipmentId })
   };
   
-  const tasks = getTasks();
-  tasks.push(task);
-  writeCSV(TASKS_FILE, tasks);
-  return task;
+  return await prisma.task.create({
+    data: formattedTask
+  });
 }
 
-export function updateTask(id: string, updates: Partial<Task>): boolean {
-  return updateCSV(TASKS_FILE, id, updates);
+export async function updateTask(id: string, updates: Partial<Task>): Promise<Task> {
+  // Handle tags if they exist
+  const formattedUpdates = {
+    ...updates,
+    tags: updates.tags ? stringifyTagsToJSON(updates.tags) : undefined,
+    updatedAt: new Date()
+  };
+  
+  return await prisma.task.update({
+    where: { id },
+    data: formattedUpdates
+  });
 }
 
-export function completeTask(id: string): boolean {
-  return updateTask(id, { completed: true });
+export async function completeTask(id: string): Promise<Task> {
+  return await prisma.task.update({
+    where: { id },
+    data: { 
+      status: "COMPLETED",
+      completedAt: new Date()
+    }
+  });
 }
 
-export function deleteTask(id: string): boolean {
-  return deleteFromCSV(TASKS_FILE, id);
+export async function deleteTask(id: string): Promise<Task> {
+  return await prisma.task.delete({
+    where: { id }
+  });
 }
 
-export function createCustomerFollowUpTask(customerId: string, description: string, dueDate?: string): Task {
-  return addTask(
-    description,
-    "medium",
-    "follow-up",
-    dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days from now
-    customerId
-  );
+export async function createCustomerFollowUpTask(
+  customerId: string, 
+  title: string, 
+  dueDate?: string | Date
+): Promise<Task> {
+  const dueDateValue = dueDate 
+    ? new Date(dueDate) 
+    : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+  
+  return await addTask({
+    title,
+    priority: "MEDIUM",
+    status: "PENDING",
+    dueDate: dueDateValue,
+    customerId,
+    tags: ["follow-up"]
+  });
 }
 
-export function createShipmentTask(shipmentId: string, description: string, priority: Task["priority"] = "medium"): Task {
-  return addTask(description, priority, "shipment", undefined, undefined, shipmentId);
+export async function createShipmentTask(
+  shipmentId: string, 
+  title: string, 
+  priority: Priority = "MEDIUM"
+): Promise<Task> {
+  return await addTask({
+    title,
+    priority,
+    status: "PENDING",
+    shipmentId,
+    tags: ["shipment"]
+  });
 }
 
-export function searchTasks(query: string): Task[] {
-  const tasks = getTasks();
+export async function searchTasks(query: string): Promise<Task[]> {
   const lowerQuery = query.toLowerCase();
   
-  return tasks.filter(task => 
-    task.description.toLowerCase().includes(lowerQuery)
-  );
+  return await prisma.task.findMany({
+    where: {
+      OR: [
+        { title: { contains: lowerQuery, mode: 'insensitive' } },
+        { description: { contains: lowerQuery, mode: 'insensitive' } },
+      ]
+    }
+  });
 }
