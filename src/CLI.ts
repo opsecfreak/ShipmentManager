@@ -68,6 +68,7 @@ export class ShipmentManagerCLI {
       city: "TBD", 
       state: "TBD",
       zipCode: "TBD",
+      country: "TBD",
       needsAttention: false
     });
     console.log(`✅ Customer created: ${customer.name} (${customer.email})`);

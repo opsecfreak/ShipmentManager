@@ -1,4 +1,3 @@
-import { cli } from "./CLI.js";
 import { DataUtils } from "./DataUtils.js";
 
 // 🎯 QUICK START GUIDE FOR SHIPMENTMANAGER

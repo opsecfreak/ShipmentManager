@@ -23,9 +23,10 @@ export function getDashboardData(): DashboardData {
 export function getTodaysTasks(): Task[] {
   const today = new Date().toISOString().split('T')[0];
   return getTasks().filter(task => {
-    return !task.completed && 
-           task.dueDate != null && 
-           task.dueDate.startsWith(today);
+    if (!task.completed && typeof task.dueDate === 'string') {
+      return task.dueDate.slice(0, 10) === today;
+    }
+    return false;
   });
 }
 
@@ -73,7 +74,10 @@ export function getCustomersSummary() {
     needingAttention: needingAttention.length,
     totalSpent: allCustomers.reduce((sum, customer) => sum + customer.totalSpent, 0),
     averageOrderValue: allCustomers.reduce((sum, customer) => sum + customer.totalSpent, 0) / 
-                      Math.max(allCustomers.reduce((sum, customer) => sum + customer.totalOrders, 0), 1)
+                      Math.max(allCustomers.reduce((sum, customer) => sum + customer.totalOrders, 0), 1),
+    industries: Array.from(new Set(allCustomers.map(c => c.industry).filter(Boolean))),
+    tags: Array.from(new Set(allCustomers.flatMap(c => c.tags || []))),
+    countries: Array.from(new Set(allCustomers.map(c => c.country).filter(Boolean))),
   };
 }
 

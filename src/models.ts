@@ -38,6 +38,7 @@ export interface Customer {
   city: string;
   state: string;
   zipCode: string;
+  country: string;
   needsAttention: boolean;
   lastContactDate?: string;
   totalOrders: number;
@@ -45,6 +46,17 @@ export interface Customer {
   preferredCarrier?: string;
   notes?: string;
   createdAt: string;
+  birthday?: string;
+  website?: string;
+  tags?: string[];
+  industry?: string;
+  vatNumber?: string;
+  contacts?: Array<{
+    name: string;
+    email?: string;
+    phone?: string;
+    role?: string;
+  }>;
 }
 
 export interface Order {

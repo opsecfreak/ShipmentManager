@@ -27,8 +27,9 @@ export function addCustomer(customerData: Omit<Customer, "id" | "createdAt" | "t
     totalOrders: 0,
     totalSpent: 0,
     createdAt: new Date().toISOString(),
+    tags: customerData.tags || [],
+    contacts: customerData.contacts || [],
   };
-  
   const customers = getCustomers();
   customers.push(customer);
   writeCSV(CUSTOMERS_FILE, customers);
@@ -60,11 +61,62 @@ export function deleteCustomer(id: string): boolean {
 export function searchCustomers(query: string): Customer[] {
   const customers = getCustomers();
   const lowerQuery = query.toLowerCase();
-  
-  return customers.filter(customer => 
+  return customers.filter(customer =>
     customer.name.toLowerCase().includes(lowerQuery) ||
     customer.email.toLowerCase().includes(lowerQuery) ||
     customer.company?.toLowerCase().includes(lowerQuery) ||
-    customer.phone?.includes(query)
+    customer.phone?.includes(query) ||
+    customer.country?.toLowerCase().includes(lowerQuery) ||
+    customer.industry?.toLowerCase().includes(lowerQuery) ||
+    (customer.tags && customer.tags.some(tag => tag.toLowerCase().includes(lowerQuery))) ||
+    (customer.contacts && customer.contacts.some(contact =>
+      contact.name.toLowerCase().includes(lowerQuery) ||
+      contact.email?.toLowerCase().includes(lowerQuery) ||
+      contact.phone?.includes(query) ||
+      contact.role?.toLowerCase().includes(lowerQuery)
+    ))
   );
+}
+
+// Advanced filtering
+export function filterCustomersByTag(tag: string): Customer[] {
+  return getCustomers().filter(c => c.tags && c.tags.includes(tag));
+}
+
+export function filterCustomersByIndustry(industry: string): Customer[] {
+  return getCustomers().filter(c => c.industry === industry);
+}
+
+export function filterCustomersByCountry(country: string): Customer[] {
+  return getCustomers().filter(c => c.country === country);
+}
+
+export function addTagToCustomer(id: string, tag: string): boolean {
+  const customer = getCustomerById(id);
+  if (!customer) return false;
+  const tags = customer.tags || [];
+  if (!tags.includes(tag)) tags.push(tag);
+  return updateCustomer(id, { tags });
+}
+
+export function removeTagFromCustomer(id: string, tag: string): boolean {
+  const customer = getCustomerById(id);
+  if (!customer || !customer.tags) return false;
+  const tags = customer.tags.filter(t => t !== tag);
+  return updateCustomer(id, { tags });
+}
+
+export function addContactToCustomer(id: string, contact: { name: string; email?: string; phone?: string; role?: string }): boolean {
+  const customer = getCustomerById(id);
+  if (!customer) return false;
+  const contacts = customer.contacts || [];
+  contacts.push(contact);
+  return updateCustomer(id, { contacts });
+}
+
+export function removeContactFromCustomer(id: string, contactName: string): boolean {
+  const customer = getCustomerById(id);
+  if (!customer || !customer.contacts) return false;
+  const contacts = customer.contacts.filter(c => c.name !== contactName);
+  return updateCustomer(id, { contacts });
 }

@@ -21,6 +21,7 @@ const customer1 = addCustomer({
   city: "San Francisco",
   state: "CA",
   zipCode: "94105",
+  country: "USA",
   needsAttention: false
 });
 
@@ -33,6 +34,7 @@ const customer2 = addCustomer({
   city: "Austin",
   state: "TX",
   zipCode: "73301",
+  country: "USA",
   needsAttention: true
 });
 
