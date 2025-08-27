@@ -22,11 +22,11 @@ export function getDashboardData(): DashboardData {
 
 export function getTodaysTasks(): Task[] {
   const today = new Date().toISOString().split('T')[0];
-  return getTasks().filter(task => 
-    !task.completed && 
-    task.dueDate !== undefined &&
-    task.dueDate.startsWith(today)
-  );
+  return getTasks().filter(task => {
+    return !task.completed && 
+           task.dueDate != null && 
+           task.dueDate.startsWith(today);
+  });
 }
 
 export function getTasksSummary() {
