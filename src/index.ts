@@ -50,15 +50,22 @@ async function main() {
       totalAmount: 403.75,
       orderDate: new Date(),
       notes: "Priority shipping requested",
-      items: [
+      items: []
+    });
+    
+    // We need to add items after order creation since they require the orderId
+    await prisma.orderItem.createMany({
+      data: [
         { 
+          orderId: order1.id,
           productName: "Wireless Headphones", 
           quantity: 2, 
           unitPrice: 149.99,
           totalPrice: 299.98, 
           description: "Premium noise-cancelling" 
         },
-        { 
+        {
+          orderId: order1.id, 
           productName: "USB-C Cable", 
           quantity: 3, 
           unitPrice: 19.99,
@@ -74,15 +81,19 @@ async function main() {
       status: "PROCESSING",
       totalAmount: 107.19,
       orderDate: new Date(),
-      items: [
-        { 
-          productName: "Bluetooth Speaker", 
-          quantity: 1, 
-          unitPrice: 89.99,
-          totalPrice: 89.99, 
-          description: "Waterproof model" 
-        }
-      ]
+      items: []
+    });
+    
+    // Add item after order creation
+    await prisma.orderItem.create({
+      data: { 
+        orderId: order2.id,
+        productName: "Bluetooth Speaker", 
+        quantity: 1, 
+        unitPrice: 89.99,
+        totalPrice: 89.99, 
+        description: "Waterproof model" 
+      }
     });
     
     // Add sample shipments
