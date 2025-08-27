@@ -1,11 +1,12 @@
 {
   "name": "shipmentmanager",
   "version": "1.0.0",
+  "type": "module",
   "description": "A Local bot that uses prisma, zod, and openai agents to help keep track of day to day business activities with a focus on technician duties and shipments/tasks.",
   "main": "index.js",
   "scripts": {
-    "start": "ts-node src/index.ts",
-    "dev": "ts-node --watch src/index.ts",
+    "start": "ts-node --esm src/index.ts",
+    "dev": "ts-node --esm --watch src/index.ts",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
